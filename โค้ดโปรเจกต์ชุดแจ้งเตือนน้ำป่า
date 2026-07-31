@@ -9,10 +9,10 @@
 #define RAIN_PIN 4      // Tipping Bucket - Signal
 
 // ==== WiFi and Telegram ====
-const char* ssid = "flood.lp.360";
-const char* password = "50094106";
-const char* botToken = "7546198707:AAHDZI57JpiyE4urUkQA47GmOKBJpOzbpCI"; // ใส่ token ของคุณ
-const char* chatID = "-1002867064553";
+const char* ssid = "---------";
+const char* password = "--------";
+const char* botToken = "------"; // ใส่ token ของคุณ
+const char* chatID = "--------";
 
 // ==== Water Level Variables ====
 long duration;
