@@ -1,0 +1,198 @@
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <UniversalTelegramBot.h>
+#include <ArduinoJson.h>
+
+// ==== Pin Configuration ====
+#define TRIG_PIN 5      // Ultrasonic Sensor - Trigger
+#define ECHO_PIN 18     // Ultrasonic Sensor - Echo
+#define RAIN_PIN 4      // Tipping Bucket - Signal
+
+// ==== WiFi and Telegram ====
+const char* ssid = "flood.lp.360";
+const char* password = "50094106";
+const char* botToken = "7546198707:AAHDZI57JpiyE4urUkQA47GmOKBJpOzbpCI"; // ใส่ token ของคุณ
+const char* chatID = "-1002867064553";
+
+// ==== Water Level Variables ====
+long duration;
+float distance;
+float waterLevel;
+bool notified30 = false;
+bool notified50 = false;
+bool notified80 = false;
+bool notified100 = false;
+bool notified130 = false;
+bool notified150 = false;
+bool notified180 = false;
+bool notified190 = false;
+
+// ==== Rainfall Variables ====
+volatile int rainCount = 0;
+volatile unsigned long lastInterruptTime = 0;
+float rainAmount = 0;
+unsigned long lastRainClickTime = 0;
+bool rainIsFalling = false;
+int lastRainLevel = 0; // 0 = ยังไม่แจ้ง, 1 = เล็กน้อย, 2 = ปานกลาง, 3 = หนัก, 4 = หนักมาก
+
+// ==== Telegram Bot ====
+WiFiClientSecure client;
+UniversalTelegramBot bot(botToken, client);
+
+// ==== Interrupt: Rain Click ====
+void IRAM_ATTR rainISR() {
+  unsigned long currentTime = millis();
+  if (currentTime - lastInterruptTime > 100) {
+    rainCount++;
+    lastRainClickTime = millis();
+    lastInterruptTime = currentTime;
+    Serial.println("💧 Rain click detected!");
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+
+  pinMode(RAIN_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(RAIN_PIN), rainISR, CHANGE);
+
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println(" Connected!");
+  client.setInsecure();
+
+  bot.sendMessage(chatID, "☁️ ระบบเริ่มทำงาน: เครื่องตรวจวัดระดับน้ำป่าไหลหลากและปริมาณน้ำฝน", "");
+}
+
+void loop() {
+  // ==== วัดระดับน้ำ ====
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  duration = pulseIn(ECHO_PIN, HIGH);
+  distance = duration * 0.034 / 2;
+  waterLevel = 200.0 - distance;   // ความสูงที่ติดเซ็นเซอร์ค์ 200 cm
+
+  Serial.print("📏 ระดับน้ำ: ");
+  Serial.print(waterLevel);
+  Serial.println(" cm");
+
+  // ==== แจ้งเตือนระดับน้ำ ====
+if (waterLevel >= 190 && !notified190) {
+  bot.sendMessage(chatID, "🚨 [ระดับน้ำ 190 cm]\nน้ำขึ้นถึงระดับอันตรายสูงสุด! 🚨\n\n⚠️ โปรดอพยพออกจากพื้นที่ทันที ", "");
+  notified190 = true;
+  notified180 = notified150 = notified130 = notified100 = notified80 = notified50 = notified30 = true;
+
+} else if (waterLevel >= 180 && !notified180 && !notified190) {
+  bot.sendMessage(chatID, "🚨 [ระดับน้ำ 180 cm]\nน้ำใกล้ถึงระดับวิกฤต!\n\n⚠️ น้ำป่าไหลหลากอาจเข้าท่วมพื้นที่ในเวลาอันสั้น", "");
+  notified180 = true;
+  notified150 = notified130 = notified100 = notified80 = notified50 = notified30 = true;
+
+} else if (waterLevel >= 150 && !notified150 && !notified180 && !notified190) {
+  bot.sendMessage(chatID, "🌊 [ระดับน้ำ 150 cm]\nน้ำสูงมากและเพิ่มขึ้นอย่างรวดเร็ว\n\n⚠️ เสี่ยงท่วมบ้านเรือนและถนนสายหลัก", "");
+  notified150 = true;
+  notified130 = notified100 = notified80 = notified50 = notified30 = true;
+
+} else if (waterLevel >= 130 && !notified130 && !notified150 && !notified180 && !notified190) {
+  bot.sendMessage(chatID, "🌊 [ระดับน้ำ 130 cm]\nน้ำเริ่มเข้าขั้นอันตราย\n\n⚠️ พื้นที่ลุ่มต่ำอาจถูกน้ำท่วม", "");
+  notified130 = true;
+  notified100 = notified80 = notified50 = notified30 = true;
+
+} else if (waterLevel >= 100 && !notified100 && !notified130 && !notified150 && !notified180 && !notified190) {
+  bot.sendMessage(chatID, "🌊 [ระดับน้ำ 100 cm]\nน้ำสูงผิดปกติ!\n\n⚠️ บ้านเรือนชั้นล่างเสี่ยงน้ำท่วม", "");
+  notified100 = true;
+  notified80 = notified50 = notified30 = true;
+
+} else if (waterLevel >= 80 && !notified80 && !notified100 && !notified130 && !notified150 && !notified180 && !notified190) {
+  bot.sendMessage(chatID, "🌊 [ระดับน้ำ 80 cm]\nน้ำสูงถึงจุดเสี่ยงแล้ว!\n\n⚠️ อาจเกิดน้ำท่วมในพื้นที่ต", "");
+  notified80 = true;
+  notified50 = notified30 = true;
+
+} else if (waterLevel >= 50 && !notified50 && !notified80 && !notified100 && !notified130 && !notified150 && !notified180 && !notified190) {
+  bot.sendMessage(chatID, "🌊 [ระดับน้ำ 50 cm]\nน้ำเริ่มสูงขึ้น\n\n⚠️ พื้นที่ต่ำเริ่มมีน้ำขัง", "");
+  notified50 = true;
+  notified30 = true;
+
+} else if (waterLevel >= 30 && !notified30 && !notified50 && !notified80 && !notified100 && !notified130 && !notified150 && !notified180 && !notified190) {
+  bot.sendMessage(chatID, "🌊 [ระดับน้ำ 30 cm]\nเริ่มมีน้ำปริมาณมากขึ้น\n\n⚠️ โปรดติดตามสถานการณ์", "");
+  notified30 = true;
+}
+
+  // ==== รีเซตการแจ้งเตือนเมื่อระดับน้ำลดลง ====
+  if (waterLevel < 30) {
+    notified30 = notified50 = notified80 = notified100 = 
+    notified130 = notified150 = notified180 = notified190 = false;
+  } else if (waterLevel < 50) {
+    notified50 = notified80 = notified100 = notified130 = notified150 = notified180 = notified190 = false;
+  } else if (waterLevel < 80) {
+    notified80 = notified100 = notified130 = notified150 = notified180 = notified190 = false;
+  } else if (waterLevel < 100) {
+    notified100 = notified130 = notified150 = notified180 = notified190 = false;
+  } else if (waterLevel < 130) {
+    notified130 = notified150 = notified180 = notified190 = false;
+  } else if (waterLevel < 150) {
+    notified150 = notified180 = notified190 = false;
+  } else if (waterLevel < 180) {
+    notified180 = notified190 = false;
+  } else if (waterLevel < 190) {
+    notified190 = false;
+  }
+
+  // ==== วัดปริมาณฝน ====
+  rainAmount = rainCount * 0.2; // 1 click = 0.2 mm
+
+  Serial.print("🌧 ปริมาณน้ำฝน: ");
+  Serial.print(rainCount);
+  Serial.print(" clicks → ");
+  Serial.print(rainAmount, 1);
+  Serial.println(" mm");
+
+  // ==== แจ้งเตือนระดับฝน ====
+  int currentRainLevel = 0;
+  if (rainAmount >= 0.1 && rainAmount <= 10.0) currentRainLevel = 1;
+  else if (rainAmount > 10.0 && rainAmount <= 35.0) currentRainLevel = 2;
+  else if (rainAmount > 35.0 && rainAmount <= 90.0) currentRainLevel = 3;
+  else if (rainAmount > 90.0) currentRainLevel = 4;
+
+  if (rainIsFalling && currentRainLevel != 0 && currentRainLevel != lastRainLevel) {
+    switch (currentRainLevel) {
+      case 1:
+        bot.sendMessage(chatID, "☔ ขณะนี้มีฝนตกเล็กน้อย อาจมีน้ำขังเล็กน้อยในบางพื้นที่ ปริมาณน้ำฝน " + String(rainAmount, 1) + " mm.", "");
+        break;
+      case 2:
+        bot.sendMessage(chatID, "🌧 ขณะนี้ฝนตกปานกลาง ถนนลื่น โปรดขับขี่ด้วยความระมัดระวัง ปริมาณน้ำฝน " + String(rainAmount, 1) + " mm.", "");
+        break;
+      case 3:
+        bot.sendMessage(chatID, "🌧️ ขณะนี้ฝนตกหนัก เสี่ยงน้ำท่วมขังในพื้นที่ลุ่มต่ำ โปรดเตรียมป้องกันน้ำเข้าบ้าน ปริมาณน้ำฝน " + String(rainAmount, 1) + " mm.", "");
+        break;
+      case 4:
+        bot.sendMessage(chatID, "⛈️ ขณะนี้ฝนตกหนักมาก! มีโอกาสเกิดน้ำป่าไหลหลากและน้ำท่วมฉับพลัน โปรดหลีกเลี่ยงการเดินทางในพื้นที่เสี่ยง ปริมาณน้ำฝน " + String(rainAmount, 1) + " mm.", "");
+        break;
+    }
+    lastRainLevel = currentRainLevel;
+  }
+
+  // ==== ตรวจว่าฝนหยุดตกหรือยัง ====
+  if (rainIsFalling && millis() - lastRainClickTime > 30 * 60 * 1000) {
+    bot.sendMessage(chatID, "☀️ ขณะนี้ฝนหยุดตกแล้ว", "");
+    rainIsFalling = false;
+    lastRainLevel = 0;
+  }
+
+  // ==== เปิดฝนตกใหม่เมื่อมี click ใหม่ ====
+  if (!rainIsFalling && millis() - lastRainClickTime < 30 * 60 * 1000) {
+    rainIsFalling = true;
+  }
+
+  delay(5000); // วน loop ทุก 5 วินาที
+}
